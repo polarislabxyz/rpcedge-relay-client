@@ -14,11 +14,14 @@ quinn.workspace = true
 reqwest = { workspace = true, features = ["json", "rustls-tls"], default-features = false }
 rustls.workspace = true
 rustls-pki-types.workspace = true
+rustls-pemfile.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+webpki-roots.workspace = true
 
 [dev-dependencies]
 httpmock.workspace = true
+rcgen = "0.13"
 tokio.workspace = true

@@ -81,15 +81,24 @@ fall back to server defaults.
   `api-key: <key>\n<raw_tx>` fallback for old clients, but legacy raw QUIC
   always uses server defaults.
 
+QUIC verifies the server name against the public WebPKI root set by default.
+There is no certificate-verification bypass. During a private-CA migration,
+use `with_additional_root_certificate` or
+`with_additional_root_certificates_pem` to overlap the old and new trust roots.
+
 Route-aware QUIC example:
 
 ```rust
-use rpcedge_relay_client::{QuicRelayClient, RelayClientConfig};
+use rpcedge_relay_client::{QuicRelayClient, QuicRelayClientConfig};
 use rpcedge_relay_protocol::{RelayRoute, RouteSet};
 
 # async fn example(raw_tx: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
-let client = QuicRelayClient::connect(RelayClientConfig::new(
-    "https://relay.rpcedge.com:4433",
+let endpoint = tokio::net::lookup_host(("relay.rpcedge.com", 4433))
+    .await?
+    .next()
+    .ok_or("relay.rpcedge.com did not resolve")?;
+let client = QuicRelayClient::connect(QuicRelayClientConfig::new(
+    endpoint,
     "00000000-0000-4000-8000-000000000000",
 ))
 .await?;

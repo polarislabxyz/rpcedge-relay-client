@@ -12,13 +12,10 @@ pub use rpcedge_relay_protocol::{
     RouteSet, RouteSetMode, SubmitRequest, TransactionEncoding, TransactionVersion, ALPN_V2,
     DEFAULT_ALPN, VERSION, VERSION_V2,
 };
-use rustls::{
-    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
-    DigitallySignedStruct, SignatureScheme,
-};
-use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::RootCertStore;
+use rustls_pki_types::CertificateDer;
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{io::Cursor, net::SocketAddr, sync::Arc, time::Duration};
 
 const DEFAULT_HTTP_TIMEOUT: Duration = Duration::from_secs(2);
 const SUBMIT_PATH: &str = "/v1/submit";
@@ -243,7 +240,7 @@ pub struct QuicRelayClientConfig {
     pub server_name: String,
     pub timeout: Duration,
     pub max_response_bytes: usize,
-    pub insecure_skip_server_certificate_verification: bool,
+    pub additional_root_certificates: Vec<CertificateDer<'static>>,
 }
 
 impl QuicRelayClientConfig {
@@ -254,7 +251,7 @@ impl QuicRelayClientConfig {
             server_name: DEFAULT_QUIC_SERVER_NAME.to_string(),
             timeout: DEFAULT_QUIC_TIMEOUT,
             max_response_bytes: DEFAULT_QUIC_MAX_RESPONSE_BYTES,
-            insecure_skip_server_certificate_verification: true,
+            additional_root_certificates: Vec::new(),
         }
     }
 
@@ -271,6 +268,30 @@ impl QuicRelayClientConfig {
     pub fn with_max_response_bytes(mut self, max_response_bytes: usize) -> Self {
         self.max_response_bytes = max_response_bytes;
         self
+    }
+
+    pub fn with_additional_root_certificate(
+        mut self,
+        certificate: CertificateDer<'static>,
+    ) -> Self {
+        self.additional_root_certificates.push(certificate);
+        self
+    }
+
+    pub fn with_additional_root_certificates_pem(
+        mut self,
+        pem: &[u8],
+    ) -> Result<Self, RelayClientError> {
+        let certificates = rustls_pemfile::certs(&mut Cursor::new(pem))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(RelayClientError::CertificatePem)?;
+        if certificates.is_empty() {
+            return Err(RelayClientError::InvalidConfig(
+                "additional root certificate PEM contains no certificates",
+            ));
+        }
+        self.additional_root_certificates.extend(certificates);
+        Ok(self)
     }
 }
 
@@ -300,7 +321,7 @@ impl QuicRelayClient {
         let mut endpoint = Endpoint::client("0.0.0.0:0".parse().expect("valid wildcard addr"))
             .map_err(RelayClientError::QuicEndpoint)?;
         endpoint.set_default_client_config(build_quic_client_config(
-            config.insecure_skip_server_certificate_verification,
+            &config.additional_root_certificates,
         )?);
 
         let connecting = endpoint
@@ -469,24 +490,30 @@ impl QuicRelayClient {
 }
 
 fn build_quic_client_config(
-    skip_cert_verification: bool,
+    additional_root_certificates: &[CertificateDer<'static>],
 ) -> Result<ClientConfig, RelayClientError> {
-    let mut crypto = if skip_cert_verification {
-        rustls::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
-            .with_no_client_auth()
-    } else {
-        rustls::ClientConfig::builder()
-            .with_root_certificates(rustls::RootCertStore::empty())
-            .with_no_client_auth()
-    };
+    let roots = build_quic_root_store(additional_root_certificates)?;
+    let mut crypto = rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
     crypto.enable_early_data = false;
     crypto.alpn_protocols = quic_alpn_protocols().to_vec();
     Ok(ClientConfig::new(Arc::new(
         quinn::crypto::rustls::QuicClientConfig::try_from(crypto)
             .map_err(RelayClientError::QuicClientConfig)?,
     )))
+}
+
+fn build_quic_root_store(
+    additional_root_certificates: &[CertificateDer<'static>],
+) -> Result<RootCertStore, RelayClientError> {
+    let mut roots = RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    for certificate in additional_root_certificates {
+        roots
+            .add(certificate.clone())
+            .map_err(RelayClientError::RootCertificate)?;
+    }
+    Ok(roots)
 }
 
 fn quic_alpn_protocols() -> [Vec<u8>; 2] {
@@ -607,46 +634,6 @@ fn parse_quic_response(response: &[u8]) -> Result<SubmitResponse, RelayClientErr
     serde_json::from_slice(response).map_err(RelayClientError::Json)
 }
 
-#[derive(Debug)]
-struct NoCertificateVerification;
-
-impl ServerCertVerifier for NoCertificateVerification {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
-        Ok(ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        rustls::crypto::ring::default_provider()
-            .signature_verification_algorithms
-            .supported_schemes()
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct SubmitResponse {
     pub accepted: bool,
@@ -697,6 +684,10 @@ pub enum RelayClientError {
     Protocol(rpcedge_relay_protocol::ProtocolError),
     #[error("failed to build QUIC endpoint: {0}")]
     QuicEndpoint(std::io::Error),
+    #[error("failed to parse additional root certificate PEM: {0}")]
+    CertificatePem(std::io::Error),
+    #[error("invalid additional root certificate: {0}")]
+    RootCertificate(rustls::Error),
     #[error("failed to start QUIC connection: {0}")]
     QuicConnectStart(quinn::ConnectError),
     #[error("failed to connect QUIC: {0}")]
@@ -856,6 +847,37 @@ mod tests {
 
         let config = config.with_max_response_bytes(128 * 1024);
         assert_eq!(config.max_response_bytes, 128 * 1024);
+    }
+
+    #[test]
+    fn quic_config_verifies_public_tls_by_default() {
+        let config = QuicRelayClientConfig::new(
+            "127.0.0.1:4433".parse().unwrap(),
+            "00000000-0000-4000-8000-000000000000",
+        );
+
+        assert!(config.additional_root_certificates.is_empty());
+        assert!(!build_quic_root_store(&config.additional_root_certificates)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn quic_config_accepts_an_overlapping_pem_trust_bundle() {
+        let first =
+            rcgen::generate_simple_self_signed(vec!["relay.rpcedge.com".to_string()]).unwrap();
+        let second =
+            rcgen::generate_simple_self_signed(vec!["relay.rpcedge.com".to_string()]).unwrap();
+        let bundle = format!("{}{}", first.cert.pem(), second.cert.pem());
+
+        let config = QuicRelayClientConfig::new(
+            "127.0.0.1:4433".parse().unwrap(),
+            "00000000-0000-4000-8000-000000000000",
+        )
+        .with_additional_root_certificates_pem(bundle.as_bytes())
+        .unwrap();
+
+        assert_eq!(config.additional_root_certificates.len(), 2);
     }
 
     #[test]
