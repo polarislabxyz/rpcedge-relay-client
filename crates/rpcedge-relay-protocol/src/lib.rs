@@ -30,6 +30,7 @@ pub enum RelayRoute {
     RpcFallback,
     JitoTransaction,
     JitoBundle,
+    TritonCascade,
 }
 
 impl RelayRoute {
