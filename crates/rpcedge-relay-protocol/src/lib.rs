@@ -24,7 +24,9 @@ pub enum RelayMethod {
 #[serde(rename_all = "snake_case")]
 pub enum RelayRoute {
     TpuQuic,
-    TpuUdp,
+    /// BAM Maker Priority Plugin: single signed update transactions sent as UDP
+    /// datagrams to the plugin port of upcoming enrolled BAM leaders.
+    BamMpp,
     HarmonicBundle,
     HeliusSenderSwqos,
     RpcFallback,
@@ -593,7 +595,7 @@ mod tests {
 
     #[test]
     fn route_set_resolves_modes() {
-        let defaults = [RelayRoute::TpuQuic, RelayRoute::TpuUdp];
+        let defaults = [RelayRoute::TpuQuic, RelayRoute::BamMpp];
 
         assert_eq!(RouteSet::server_default().resolve(&defaults), defaults);
         assert_eq!(
@@ -604,12 +606,12 @@ mod tests {
             RouteSet::default_plus([RelayRoute::JitoBundle]).resolve(&defaults),
             [
                 RelayRoute::TpuQuic,
-                RelayRoute::TpuUdp,
+                RelayRoute::BamMpp,
                 RelayRoute::JitoBundle
             ]
         );
         assert_eq!(
-            RouteSet::default_minus([RelayRoute::TpuUdp]).resolve(&defaults),
+            RouteSet::default_minus([RelayRoute::BamMpp]).resolve(&defaults),
             [RelayRoute::TpuQuic]
         );
     }
