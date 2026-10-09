@@ -33,6 +33,9 @@ pub enum RelayRoute {
     JitoTransaction,
     JitoBundle,
     TritonCascade,
+    /// BAM bundles: one to five signed transactions submitted directly to a
+    /// BAM node, which schedules them for BAM leaders without a block-engine hop.
+    BamBundle,
 }
 
 impl RelayRoute {
@@ -591,6 +594,15 @@ mod tests {
             classify_transaction_wire(&legacy_wire(0x82)),
             Err(TransactionWireError::UnsupportedVersion(2))
         );
+    }
+
+    #[test]
+    fn bam_bundle_route_uses_its_snake_case_name() {
+        let encoded = serde_json::to_string(&RelayRoute::BamBundle).unwrap();
+        assert_eq!(encoded, "\"bam_bundle\"");
+        let decoded: RelayRoute = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, RelayRoute::BamBundle);
+        assert!(!RelayRoute::BamBundle.is_jito());
     }
 
     #[test]
