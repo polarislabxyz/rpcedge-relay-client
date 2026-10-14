@@ -36,6 +36,10 @@ pub enum RelayRoute {
     /// BAM bundles: one to five signed transactions submitted directly to a
     /// BAM node, which schedules them for BAM leaders without a block-engine hop.
     BamBundle,
+    /// Astralane Iris over QUIC: one signed transaction per stream to
+    /// Astralane's staked sender, which forwards it without a block-engine
+    /// auction. The transaction itself tips an Astralane tip account.
+    AstralaneQuic,
 }
 
 impl RelayRoute {
@@ -603,6 +607,15 @@ mod tests {
         let decoded: RelayRoute = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, RelayRoute::BamBundle);
         assert!(!RelayRoute::BamBundle.is_jito());
+    }
+
+    #[test]
+    fn astralane_quic_route_uses_its_snake_case_name() {
+        let encoded = serde_json::to_string(&RelayRoute::AstralaneQuic).unwrap();
+        assert_eq!(encoded, "\"astralane_quic\"");
+        let decoded: RelayRoute = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, RelayRoute::AstralaneQuic);
+        assert!(!RelayRoute::AstralaneQuic.is_jito());
     }
 
     #[test]
