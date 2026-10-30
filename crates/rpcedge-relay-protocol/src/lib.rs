@@ -40,6 +40,10 @@ pub enum RelayRoute {
     /// Astralane's staked sender, which forwards it without a block-engine
     /// auction. The transaction itself tips an Astralane tip account.
     AstralaneQuic,
+    /// Helius staked connections: a plain `sendTransaction` to Helius RPC,
+    /// which paid plans forward over staked (SWQoS) connections. No tip, unlike
+    /// `helius_sender_swqos`.
+    HeliusStaked,
 }
 
 impl RelayRoute {
@@ -616,6 +620,15 @@ mod tests {
         let decoded: RelayRoute = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, RelayRoute::AstralaneQuic);
         assert!(!RelayRoute::AstralaneQuic.is_jito());
+    }
+
+    #[test]
+    fn helius_staked_route_uses_its_snake_case_name() {
+        let encoded = serde_json::to_string(&RelayRoute::HeliusStaked).unwrap();
+        assert_eq!(encoded, "\"helius_staked\"");
+        let decoded: RelayRoute = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, RelayRoute::HeliusStaked);
+        assert!(!RelayRoute::HeliusStaked.is_jito());
     }
 
     #[test]
