@@ -44,6 +44,11 @@ pub enum RelayRoute {
     /// which paid plans forward over staked (SWQoS) connections. No tip, unlike
     /// `helius_sender_swqos`.
     HeliusStaked,
+    /// GBX (Gravity Block Exchange) bundles: one to five signed transactions
+    /// sent to a GBX broadcaster's Jito-compatible `SendBundle`, which fans
+    /// them out to the GBX block builders. Revert-protected; lands only in
+    /// slots of GBX-connected leaders.
+    GbxBundle,
 }
 
 impl RelayRoute {
@@ -629,6 +634,15 @@ mod tests {
         let decoded: RelayRoute = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, RelayRoute::HeliusStaked);
         assert!(!RelayRoute::HeliusStaked.is_jito());
+    }
+
+    #[test]
+    fn gbx_bundle_route_uses_its_snake_case_name() {
+        let encoded = serde_json::to_string(&RelayRoute::GbxBundle).unwrap();
+        assert_eq!(encoded, "\"gbx_bundle\"");
+        let decoded: RelayRoute = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, RelayRoute::GbxBundle);
+        assert!(!RelayRoute::GbxBundle.is_jito());
     }
 
     #[test]
